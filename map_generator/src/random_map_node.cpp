@@ -21,6 +21,9 @@
 //   ~resolution        double, default 0.1
 //   ~pcd_out_path      string, default ""  (if non-empty, save PCD there)
 //   ~scene_type        int,    default 0
+//   ~use_ground_plane  bool,   default false  (Branch 1: inject z=ground_z grid)
+//   ~ground_resolution double, default 0.1    (ground grid spacing, meters)
+//   ~ground_z          double, default 0.0    (ground plane altitude, meters)
 //
 // scene_type=0 only:
 //   ~obstacle_num / ~obstacle_radius_min/max / ~obstacle_height_min/max /
@@ -50,6 +53,7 @@
 #include <cmath>
 
 #include "yopo_maps/maps.hpp"
+#include "ground_plane.hpp"
 
 namespace {
 
@@ -187,6 +191,9 @@ int main(int argc, char** argv) {
   double h_max          = 3.0;
   double resolution     = 0.1;
   double keepout_radius = 2.0;
+  bool   use_ground_plane  = false;
+  double ground_resolution = 0.1;
+  double ground_z          = 0.0;
   std::string pcd_out_path;
 
   nh.param("seed",                 seed,           seed);
@@ -201,6 +208,9 @@ int main(int argc, char** argv) {
   nh.param("obstacle_height_max",  h_max,          h_max);
   nh.param("resolution",           resolution,     resolution);
   nh.param("keepout_radius",       keepout_radius, keepout_radius);
+  nh.param("use_ground_plane",     use_ground_plane,  use_ground_plane);
+  nh.param("ground_resolution",    ground_resolution, ground_resolution);
+  nh.param("ground_z",             ground_z,          ground_z);
   nh.param<std::string>("pcd_out_path", pcd_out_path, std::string(""));
 
   uint32_t actual_seed;
@@ -225,6 +235,14 @@ int main(int argc, char** argv) {
   } else {
     ROS_ERROR("[random_map_node] unsupported scene_type=%d (expected 0..7)", scene_type);
     return 1;
+  }
+
+  if (use_ground_plane) {
+    const size_t before = cloud.points.size();
+    map_generator::appendGroundPlane(cloud, map_size_x, map_size_y,
+                                     ground_resolution, ground_z);
+    ROS_INFO("[random_map_node] ground plane: +%zu points at z=%.3f (res=%.3f)",
+             cloud.points.size() - before, ground_z, ground_resolution);
   }
 
   // Voxel downsample to target resolution.

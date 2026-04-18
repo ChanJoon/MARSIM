@@ -50,6 +50,17 @@
     <arg name="yopo_wall_number"         default="100"/>
     <arg name="yopo_wall_ceiling"        default="1"/>
 
+    <!-- Branch 1: conditional ground plane. Off by default => byte-identical
+         to the legacy golden path. When true, a dense z=ground_z grid is
+         injected into the published global_map cloud so both renderers
+         (CPU pcl_render_node, GPU opengl_render_node via scratch PCD)
+         see a floor and planners avoid it. -->
+    <arg name="use_ground_plane"  default="false"/>
+    <arg name="ground_resolution" default="0.1"/>
+    <arg name="ground_size_x"     default="$(arg random_map_size_x)"/>
+    <arg name="ground_size_y"     default="$(arg random_map_size_y)"/>
+    <arg name="ground_z"          default="0.0"/>
+
     <group if="$(eval arg('map_mode') == 'static')">
        <node pkg="map_generator" name="map_pub" type="map_pub" output="screen"
              args="$(arg map_name)">
@@ -59,6 +70,11 @@
             <param name="map_offset_x" value="0.0"/>
             <param name="map_offset_y" value="0.0"/>
             <param name="map_offset_z" value="0.0"/>
+            <param name="use_ground_plane"  value="$(eval 1 if arg('use_ground_plane') else 0)"/>
+            <param name="ground_resolution" value="$(arg ground_resolution)"/>
+            <param name="ground_size_x"     value="$(arg ground_size_x)"/>
+            <param name="ground_size_y"     value="$(arg ground_size_y)"/>
+            <param name="ground_z"          value="$(arg ground_z)"/>
        </node>
 
         <group if="$(arg use_gpu_)">
@@ -114,6 +130,10 @@
             <param name="wall_thick"          value="$(arg yopo_wall_thick)"/>
             <param name="wall_number"         value="$(arg yopo_wall_number)"/>
             <param name="wall_ceiling"        value="$(arg yopo_wall_ceiling)"/>
+            <!-- Branch 1: ground plane pass-through. -->
+            <param name="use_ground_plane"    value="$(arg use_ground_plane)"/>
+            <param name="ground_resolution"   value="$(arg ground_resolution)"/>
+            <param name="ground_z"            value="$(arg ground_z)"/>
         </node>
     </group>
 

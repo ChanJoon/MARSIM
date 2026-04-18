@@ -26,6 +26,8 @@
 #include <ros/package.h>
 #include <vector>
 
+#include "ground_plane.hpp"
+
 typedef pcl::PointXYZ PointT;
 
 using namespace std;
@@ -35,6 +37,14 @@ int add_boundary = 0;
 int is_bridge = 0;
 double downsample_res;
 double map_offset_x,map_offset_y,map_offset_z;
+
+// Branch 1: conditional ground plane. All default to "off" so the legacy
+// golden path is bit-for-bit preserved.
+int    use_ground_plane   = 0;
+double ground_resolution  = 0.1;
+double ground_size_x      = 40.0;
+double ground_size_y      = 40.0;
+double ground_z           = 0.0;
 
 int minus_twopointcloud(pcl::PointCloud<pcl::PointXYZ>& cloud_input, pcl::PointCloud<pcl::PointXYZ>& cloud_input2, pcl::PointCloud<pcl::PointXYZ>& cloud_output)
 {
@@ -71,6 +81,12 @@ int main(int argc, char** argv)
   node.getParam("map_offset_x", map_offset_x);
   node.getParam("map_offset_y", map_offset_y);
   node.getParam("map_offset_z", map_offset_z);
+
+  node.getParam("use_ground_plane",  use_ground_plane);
+  node.getParam("ground_resolution", ground_resolution);
+  node.getParam("ground_size_x",     ground_size_x);
+  node.getParam("ground_size_y",     ground_size_y);
+  node.getParam("ground_z",          ground_z);
 
   ros::Publisher cloud_pub = node.advertise<sensor_msgs::PointCloud2>("/map_generator/global_cloud", 10, true);
   file_name = argv[1];
@@ -235,6 +251,16 @@ int main(int argc, char** argv)
   cloud = cloud_boundary+cloud;
 
   ROS_INFO("ADD BOUNDARY!!!");
+  }
+
+  if (use_ground_plane == 1)
+  {
+    const size_t before = cloud.points.size();
+    map_generator::appendGroundPlane(cloud, ground_size_x, ground_size_y,
+                                     ground_resolution, ground_z);
+    ROS_INFO("Ground plane: +%zu points at z=%.3f (res=%.3f over %.1fx%.1f m)",
+             cloud.points.size() - before, ground_z, ground_resolution,
+             ground_size_x, ground_size_y);
   }
 
   // pcl::VoxelGrid<pcl::PointXYZ> _voxel_sampler;
