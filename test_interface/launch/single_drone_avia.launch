@@ -1,6 +1,10 @@
 <launch>
     <arg name="use_gpu_" value="false"/>
 
+    <!-- Branch 4: controller_type=pid runs cascadePID_node (default, byte-identical).
+         controller_type=so3 runs the Lee 2010 geometric controller instead. -->
+    <arg name="controller_type" default="pid"/>
+
     <arg name="drone_num" value="1"/>
 
     <arg name="frame_id" value="world"/>
@@ -150,6 +154,7 @@
         <arg name="odom_topic" value="$(arg odom_topic)"/>
         <arg name="use_gpu" value="$(arg use_gpu_)"/>
         <arg name="use_uav_extra_model_" value="$(arg use_uav_extra_model)"/>
+        <arg name="controller_type" value="$(arg controller_type)"/>
     </include>
 
    <node name="rvizvisualisation" pkg="rviz" type="rviz" output="screen"

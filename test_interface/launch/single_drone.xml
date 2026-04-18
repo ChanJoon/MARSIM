@@ -11,6 +11,9 @@
     <arg name="downsample_resolution_"/>
     <arg name="use_gpu"/>
     <arg name="use_uav_extra_model_"/>
+    <!-- controller_type: pid (default, bit-for-bit cascadePID_node)
+                          so3 (Lee 2010 geometric controller) -->
+    <arg name="controller_type" default="pid"/>
 
        <!-- <node pkg="bubble_planner" type="planning" name="quad_$(arg drone_id)_planner" output="screen">
            <rosparam command="load" file="$(find bubble_planner)/config/advanced_params.yaml"/>
@@ -43,22 +46,43 @@
         <param name="init_state_z" value="$(arg init_z_)"/>
     </node>
 
-    <node pkg="cascadePID" name="quad$(arg drone_id)_cascadePID_node" type="cascadePID_node" >
-        <param name="drone_id" value="$(arg drone_id)"/>
-        <remap from="~odom" to="/quad_$(arg drone_id)/$(arg odom_topic)"/>
-        <remap from="~cmd_RPM" to="/quad_$(arg drone_id)/cmdRPM"/>
-        <remap from="~cmd_pose" to="/goal"/>
-        <!--/quad_$(arg drone_id)/pos_cmd  -->
-        <remap from="~position_cmd" to="/quad_$(arg drone_id)/planning/pos_cmd"/>
-        <param name="controller_rate" value="200"/>
-        <param name="quadrotor_name" value="quad_$(arg drone_id)"/>
-        <param name="init_state_x" value="$(arg init_x_)"/>
-        <param name="init_state_y" value="$(arg init_y_)"/>
-        <param name="init_state_z" value="$(arg init_z_)"/>
-        <param name="init_state_yaw" value="$(arg init_yaw)"/>
-        <param name="angle_stable_time" value="0.5"/>
-        <param name="damping_ratio" value="1.0"/>
-    </node>
+    <group if="$(eval arg('controller_type') == 'pid')">
+        <node pkg="cascadePID" name="quad$(arg drone_id)_cascadePID_node" type="cascadePID_node" >
+            <param name="drone_id" value="$(arg drone_id)"/>
+            <remap from="~odom" to="/quad_$(arg drone_id)/$(arg odom_topic)"/>
+            <remap from="~cmd_RPM" to="/quad_$(arg drone_id)/cmdRPM"/>
+            <remap from="~cmd_pose" to="/goal"/>
+            <!--/quad_$(arg drone_id)/pos_cmd  -->
+            <remap from="~position_cmd" to="/quad_$(arg drone_id)/planning/pos_cmd"/>
+            <param name="controller_rate" value="200"/>
+            <param name="quadrotor_name" value="quad_$(arg drone_id)"/>
+            <param name="init_state_x" value="$(arg init_x_)"/>
+            <param name="init_state_y" value="$(arg init_y_)"/>
+            <param name="init_state_z" value="$(arg init_z_)"/>
+            <param name="init_state_yaw" value="$(arg init_yaw)"/>
+            <param name="angle_stable_time" value="0.5"/>
+            <param name="damping_ratio" value="1.0"/>
+        </node>
+    </group>
+
+    <group if="$(eval arg('controller_type') == 'so3')">
+        <node pkg="cascadePID" name="quad$(arg drone_id)_so3_controller_node" type="so3_controller_node">
+            <remap from="~odom" to="/quad_$(arg drone_id)/$(arg odom_topic)"/>
+            <remap from="~cmd_RPM" to="/quad_$(arg drone_id)/cmdRPM"/>
+            <remap from="~position_cmd" to="/quad_$(arg drone_id)/planning/pos_cmd"/>
+            <param name="controller_rate" value="200"/>
+            <param name="init_state_x" value="$(arg init_x_)"/>
+            <param name="init_state_y" value="$(arg init_y_)"/>
+            <param name="init_state_z" value="$(arg init_z_)"/>
+            <!-- Aligned with quadrotor_dynamics_node (1.9) and cascadePID (1.9). -->
+            <param name="mass" value="1.9"/>
+            <rosparam param="k_x">[7.0, 7.0, 11.0]</rosparam>
+            <rosparam param="k_v">[4.0, 4.0, 7.0]</rosparam>
+            <rosparam param="k_R">[1.5, 1.5, 0.5]</rosparam>
+            <rosparam param="k_Omega">[0.3, 0.3, 0.15]</rosparam>
+            <rosparam param="inertia_diag">[0.03, 0.03, 0.06]</rosparam>
+        </node>
+    </group>
 
     <node pkg="odom_visualization" name="quad$(arg drone_id)_odom_visualization" type="odom_visualization"
           output="screen">
