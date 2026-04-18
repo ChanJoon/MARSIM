@@ -2,6 +2,7 @@
 #include <ros/ros.h>
 #include <ros/package.h>
 #include <sensor_msgs/PointCloud2.h>
+#include <sensor_msgs/CameraInfo.h>
 #include <nav_msgs/Odometry.h>
 #include <nav_msgs/Path.h>
 #include <sensor_msgs/Image.h>
@@ -33,7 +34,13 @@ int drone_id = 0;
 
 opengl_pointcloud_render render;
 
-ros::Publisher pub_cloud, pub_pose,pub_intercloud,pub_dyncloud, pub_uavcloud, depth_img_pub_,comp_time_pub,pub_collisioncloud;
+ros::Publisher pub_cloud, pub_pose,pub_intercloud,pub_dyncloud, pub_uavcloud, depth_img_pub_, camera_info_pub_, comp_time_pub,pub_collisioncloud;
+
+// Branch 3: pinhole depth mode params.
+std::string sensor_type_param;
+double ph_fx, ph_fy, ph_cx, ph_cy;
+int    ph_image_width, ph_image_height;
+double ph_near_clip, ph_far_clip;
 sensor_msgs::PointCloud2 local_map_pcl;
 sensor_msgs::PointCloud2 local_depth_pcl;
 ros::Subscriber odom_sub;
@@ -674,7 +681,38 @@ void renderSensedPoints(const ros::TimerEvent& event)
     sensor_map_pcd.header.stamp = time_stamp_;
     pub_intercloud.publish(sensor_map_pcd);
 
-    
+    // Branch 3: publish depth_img and camera_info in depth_pinhole mode.
+    // In lidar mode these publishers are never called — byte-for-byte same behaviour.
+    if (sensor_type_param == "depth_pinhole") {
+        // Publish sensor_msgs::Image (32FC1, metric metres).
+        const cv::Mat& depth_m = render.getPinholeDepthImage();
+        if (!depth_m.empty()) {
+            cv_bridge::CvImage depth_msg;
+            depth_msg.header.stamp    = time_stamp_;
+            depth_msg.header.frame_id = "/sensor";
+            depth_msg.encoding        = sensor_msgs::image_encodings::TYPE_32FC1;
+            depth_msg.image           = depth_m;
+            depth_img_pub_.publish(depth_msg.toImageMsg());
+        }
+
+        // Publish CameraInfo (pinhole intrinsics).
+        sensor_msgs::CameraInfo ci;
+        ci.header.stamp    = time_stamp_;
+        ci.header.frame_id = "/sensor";
+        ci.width  = static_cast<uint32_t>(ph_image_width);
+        ci.height = static_cast<uint32_t>(ph_image_height);
+        ci.distortion_model = "plumb_bob";
+        ci.D.assign(5, 0.0); // no distortion
+        // K: row-major 3x3 intrinsics matrix
+        ci.K = { static_cast<double>(ph_fx), 0.0, static_cast<double>(ph_cx),
+                 0.0, static_cast<double>(ph_fy), static_cast<double>(ph_cy),
+                 0.0, 0.0, 1.0 };
+        // P: 3x4 projection matrix (no Tx/Ty baseline for monocular)
+        ci.P = { static_cast<double>(ph_fx), 0.0, static_cast<double>(ph_cx), 0.0,
+                 0.0, static_cast<double>(ph_fy), static_cast<double>(ph_cy), 0.0,
+                 0.0, 0.0, 1.0, 0.0 };
+        camera_info_pub_.publish(ci);
+    }
 }
 
 int main(int argc, char** argv)
@@ -701,6 +739,18 @@ int main(int argc, char** argv)
   nh.getParam("use_os128_pattern",use_os128_pattern);
 
   nh.getParam("use_gaussian_filter",use_gaussian_filter);
+
+  // Branch 3: pinhole depth mode params.
+  // Defaults match YOPO's sensor spec (160x96, H-FOV≈90°, V-FOV≈60°).
+  nh.param<std::string>("sensor_type", sensor_type_param, "lidar");
+  nh.param("image_width",  ph_image_width,  160);
+  nh.param("image_height", ph_image_height, 96);
+  nh.param("fx",           ph_fx,           80.0);
+  nh.param("fy",           ph_fy,           83.14);
+  nh.param("cx",           ph_cx,           80.0);
+  nh.param("cy",           ph_cy,           48.0);
+  nh.param("near_clip",    ph_near_clip,    0.1);
+  nh.param("far_clip",     ph_far_clip,     sensing_horizon);
 
   //dyn parameters
   nh.getParam("dynobj_enable", dynobj_enable);
@@ -787,6 +837,15 @@ int main(int argc, char** argv)
   }
   image_height = ceil(vertical_fov/polar_resolution);
   render.setParameters(image_width,image_height,250,250,downsample_res,polar_resolution,yaw_fov,vertical_fov,0.1,sensing_horizon,sensing_rate,use_avia_pattern,use_os128_pattern,use_minicf_pattern);
+
+  // Branch 3: configure pinhole mode (no-op for sensor_type=="lidar").
+  render.setPinholeParameters(
+      sensor_type_param,
+      static_cast<float>(ph_fx),  static_cast<float>(ph_fy),
+      static_cast<float>(ph_cx),  static_cast<float>(ph_cy),
+      ph_image_width, ph_image_height,
+      static_cast<float>(ph_near_clip), static_cast<float>(ph_far_clip),
+      (use_gaussian_filter != 0), 0.02f /* 2 cm sigma default */);
 
   render.read_pointcloud_fromfile(file_name);
   //home/dji/kong_ws/src/Exploration_sim/uav_simulator/map_generator/resource/Knowles_merge_01cutoff.pcd
@@ -911,6 +970,8 @@ int main(int argc, char** argv)
   pub_pose = nh.advertise<geometry_msgs::PoseStamped>("sensor_pose", 10);
   pub_uavcloud = nh.advertise<sensor_msgs::PointCloud2>("uav_cloud", 10);
   depth_img_pub_ = nh.advertise<sensor_msgs::Image>("depth_img", 10);
+  // Branch 3: CameraInfo publisher (namespace matches depth_img — same node ns).
+  camera_info_pub_ = nh.advertise<sensor_msgs::CameraInfo>("camera_info", 10);
   comp_time_pub = nh.advertise<geometry_msgs::PoseStamped>("simulator_compute_time", 10);
   pub_collisioncloud = nh.advertise<sensor_msgs::PointCloud2>("collision_cloud", 10);
   double sensing_duration = 1.0 / sensing_rate;

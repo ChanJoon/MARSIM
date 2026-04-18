@@ -14,6 +14,20 @@
     <!-- controller_type: pid (default, bit-for-bit cascadePID_node)
                           so3 (Lee 2010 geometric controller) -->
     <arg name="controller_type" default="pid"/>
+    <!-- Branch 3: sensor_type selects GPU renderer mode.
+         "lidar"         — polar 360camera.vs, behaviour byte-identical to pre-merge (default).
+         "depth_pinhole" — standard pinhole camera.vs/fs, publishes 32FC1 metric depth +
+                           CameraInfo.  Effective only when use_gpu:=true. -->
+    <arg name="sensor_type"         default="lidar"/>
+    <arg name="image_width"         default="160"/>
+    <arg name="image_height"        default="96"/>
+    <arg name="fx"                  default="80.0"/>
+    <arg name="fy"                  default="83.14"/>
+    <arg name="cx"                  default="80.0"/>
+    <arg name="cy"                  default="48.0"/>
+    <arg name="near_clip"           default="0.1"/>
+    <arg name="far_clip"            default="30.0"/>
+    <arg name="use_gaussian_filter" default="0"/>
 
        <!-- <node pkg="bubble_planner" type="planning" name="quad_$(arg drone_id)_planner" output="screen">
            <rosparam command="load" file="$(find bubble_planner)/config/advanced_params.yaml"/>
@@ -105,7 +119,7 @@
     <group if="$(arg use_gpu)">
 
         <group if="$(eval lidar_type == 'avia')">
-            <node pkg="local_sensing_node" type="opengl_render_node" name="quad$(arg drone_id)_pcl_render_node" output="screen" 
+            <node pkg="local_sensing_node" type="opengl_render_node" name="quad$(arg drone_id)_pcl_render_node" output="screen"
                 args="$(arg map_name_)">
             <remap from="~global_map" to="/map_generator/global_cloud"/>
             <remap from="~odometry" to="/quad_$(arg drone_id)/$(arg odom_topic)"/>
@@ -141,6 +155,19 @@
             <param name="collision_range" value="0.3"/>
 
             <param name="output_pcd" value="0"/>
+
+            <!-- Branch 3: pinhole depth mode params.
+                 When sensor_type=lidar (default), all pinhole params are read but ignored. -->
+            <param name="sensor_type"         value="$(arg sensor_type)"/>
+            <param name="image_width"         value="$(arg image_width)"/>
+            <param name="image_height"        value="$(arg image_height)"/>
+            <param name="fx"                  value="$(arg fx)"/>
+            <param name="fy"                  value="$(arg fy)"/>
+            <param name="cx"                  value="$(arg cx)"/>
+            <param name="cy"                  value="$(arg cy)"/>
+            <param name="near_clip"           value="$(arg near_clip)"/>
+            <param name="far_clip"            value="$(arg far_clip)"/>
+            <param name="use_gaussian_filter" value="$(arg use_gaussian_filter)"/>
 
         </node>
         </group>

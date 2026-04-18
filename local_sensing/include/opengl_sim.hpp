@@ -1,3 +1,9 @@
+// opengl_sim.hpp — GPU point-cloud and depth renderer.
+// Branch 3 adds sensor_type switch (lidar | depth_pinhole).
+//   lidar        : polar 360camera.vs shader, existing readback path — bit-for-bit unchanged.
+//   depth_pinhole: standard pinhole camera.vs/fs shaders, metric-depth GL_RED readback,
+//                  CameraInfo-compatible intrinsics, optional Gaussian noise on readback buffer.
+// All polar-path code is untouched when sensor_type == "lidar".
 #include <pcl/point_cloud.h>
 #include <pcl/point_types.h>
 #include <pcl/common/transforms.h>
@@ -10,6 +16,7 @@
 #include <pcl/search/kdtree.h>
 #include <pcl/kdtree/kdtree_flann.h>
 #include <pcl/filters/voxel_grid.h>
+#include <random>
 
 // #include <pangolin/var/var.h>
 // #include <pangolin/var/varextra.h>
@@ -67,6 +74,22 @@ class opengl_pointcloud_render
     ~opengl_pointcloud_render();
     void setParameters(int width, int height, float fx, float fy, float downsample_res, float polar_res_, float yaw_fov_,\
                  float vertical_fov_,float near,float far,int sensing_rate,int use_avia_pattern, int use_os128_pattern, int use_minicf_pattern);
+    // Branch 3: pinhole sensor mode parameters.
+    // Call after setParameters() (which sets near/far) to activate pinhole mode.
+    // sensor_type_: "lidar" (default, polar path) or "depth_pinhole".
+    // fx_, fy_, cx_, cy_: pinhole intrinsics (pixels).
+    // img_w_, img_h_: render resolution; overrides the polar-computed width/height.
+    // use_noise: if true, additive Gaussian noise (sigma = noise_sigma_m, metres) is
+    //            applied to the metric depth readback buffer before returning.
+    void setPinholeParameters(const std::string& sensor_type_,
+                              float fx_, float fy_, float cx_, float cy_,
+                              int img_w_, int img_h_,
+                              float near_clip_, float far_clip_,
+                              bool use_noise, float noise_sigma_m_);
+    // Returns the last pinhole depth image (CV_32FC1, metric metres).
+    // Only valid after render_pointcloud() in depth_pinhole mode.
+    const cv::Mat& getPinholeDepthImage() const { return pinhole_depth_img_; }
+
     void render_pointcloud(pcl::PointCloud<PointType>::Ptr output_pointcloud, Eigen::Vector3f camera_pos, Eigen::Quaternionf camera_q, double t_pattern_start);
     void input_dyn_clouds(pcl::PointCloud<pcl::PointXYZI> input_cloud);
 
@@ -86,6 +109,25 @@ class opengl_pointcloud_render
     unsigned int VBO, VAO, EBO;
     GLFWwindow* window;
     Shader ourShader;
+
+    // Branch 3: pinhole mode state.
+    std::string sensor_type_ = "lidar"; // "lidar" | "depth_pinhole"
+    Shader pinholeShader_;              // loaded from camera.vs / camera.fs
+    bool pinhole_shader_loaded_ = false;
+    // Pinhole intrinsics (used only when sensor_type_=="depth_pinhole").
+    float ph_fx_ = 80.0f;
+    float ph_fy_ = 83.14f;
+    float ph_cx_ = 80.0f;
+    float ph_cy_ = 48.0f;
+    int   ph_img_w_ = 160;
+    int   ph_img_h_ = 96;
+    float ph_near_  = 0.1f;
+    float ph_far_   = 30.0f;
+    // Gaussian noise on pinhole readback (metric metres).
+    bool  ph_use_noise_ = false;
+    float ph_noise_sigma_ = 0.0f;
+    // Output depth image for pinhole mode (CV_32FC1, metric metres).
+    cv::Mat pinhole_depth_img_;
 
     int use_avia_pattern = 0;
     int use_os128_pattern = 0;
@@ -147,6 +189,18 @@ class opengl_pointcloud_render
         double s;
         double v;
     };
+
+    // Branch 3 private helpers.
+    // Read GL_RED float buffer from the framebuffer as a metric depth image
+    // (CV_32FC1, metres), apply optional Gaussian noise, back-project to
+    // render_cloud, and store the image in pinhole_depth_img_.
+    void read_depth_pinhole();
+    // Apply additive zero-mean Gaussian noise (sigma in metres) to a metric
+    // depth buffer.  Ported from CPU noise pattern (pcl_render_node philosophy).
+    void apply_gaussian_noise_to_depth(cv::Mat& depth_m, float sigma);
+    // Back-project pinhole metric depth image to a point cloud in world frame.
+    void depth_to_pointcloud_pinhole(const cv::Mat& depth_m,
+                                     pcl::PointCloud<PointType>::Ptr out_cloud);
 
     float LinearizeDepth(float depth,float near, float far);
     float regainrealdepth(float depth,float near, float far);
@@ -222,6 +276,29 @@ void opengl_pointcloud_render::setParameters(int width, int height, float fx, fl
         this->pattern_matrix.setConstant(1);
     }
     
+}
+
+void opengl_pointcloud_render::setPinholeParameters(
+        const std::string& sensor_type,
+        float fx, float fy, float cx, float cy,
+        int img_w, int img_h,
+        float near_clip, float far_clip,
+        bool use_noise, float noise_sigma_m)
+{
+    sensor_type_ = sensor_type;
+    ph_fx_ = fx;  ph_fy_ = fy;  ph_cx_ = cx;  ph_cy_ = cy;
+    ph_img_w_ = img_w;  ph_img_h_ = img_h;
+    ph_near_  = near_clip;  ph_far_ = far_clip;
+    ph_use_noise_ = use_noise;  ph_noise_sigma_ = noise_sigma_m;
+
+    // When in depth_pinhole mode the render resolution is driven by the pinhole
+    // image size, not the polar FOV/resolution formula.
+    if (sensor_type_ == "depth_pinhole") {
+        this->width  = img_w;
+        this->height = img_h;
+        this->near   = near_clip;
+        this->far    = far_clip;
+    }
 }
 
 void opengl_pointcloud_render::input_dyn_clouds(pcl::PointCloud<pcl::PointXYZI> input_cloud)
@@ -330,12 +407,23 @@ void opengl_pointcloud_render::read_pointcloud_fromfile(std::string map_filename
     std::string root_dir = ROOT_DIR;
     current_path = root_dir + "include/";
     printf("Current Path: %s\n",current_path.c_str());
-    std::string vertex_path = current_path + "360camera.vs";
     std::string fragment_path = current_path + "camera.fs";
-    Shader inputshader(vertex_path.c_str(), fragment_path.c_str());
-    ourShader = inputshader;
 
-    std::cout << "shader path = " << vertex_path << std::endl;;
+    if (sensor_type_ == "depth_pinhole") {
+        // Branch 3: pinhole mode — load camera.vs (with metric-depth varying) +
+        // camera.fs (discard + red=metric_depth).
+        std::string pinhole_vs = current_path + "camera.vs";
+        std::cout << "depth_pinhole shader path = " << pinhole_vs << std::endl;
+        Shader ph_shader(pinhole_vs.c_str(), fragment_path.c_str());
+        ourShader = ph_shader;
+        pinhole_shader_loaded_ = true;
+    } else {
+        // lidar (polar) mode — use original 360camera.vs, unchanged.
+        std::string vertex_path = current_path + "360camera.vs";
+        std::cout << "shader path = " << vertex_path << std::endl;
+        Shader inputshader(vertex_path.c_str(), fragment_path.c_str());
+        ourShader = inputshader;
+    }
 
     // std::cout << "You Pushed a button, now open file: " << a_string.Get() << endl;
     load_pcd_file( map_filename ,cloud_color_mesh);
@@ -610,26 +698,49 @@ void opengl_pointcloud_render::render_pointcloud(pcl::PointCloud<PointType>::Ptr
         glClearColor(0.0f, 0.0f, 0.0f, 1.0f);
         glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT); 
 
-        // activate shader
         ourShader.use();
 
-        // pass projection matrix to shader (note that in this case it could change every frame)
-        projection = glm::perspective((float)atan(((float)width)/(2*fv))*2, (float)width / (float)height, near, far);
+        // Build projection matrix: pinhole from intrinsics, or polar perspective.
+        if (sensor_type_ == "depth_pinhole") {
+            // Branch 3: pinhole projection from camera intrinsics.
+            // Maps pinhole (fx,fy,cx,cy,W,H) to an OpenGL perspective matrix.
+            // Formula: https://strawlab.org/2011/11/05/augmented-reality-with-OpenGL/
+            float W = (float)ph_img_w_;
+            float H = (float)ph_img_h_;
+            float n = ph_near_;
+            float f = ph_far_;
+            // Column-major glm::mat4
+            projection = glm::mat4(0.0f);
+            projection[0][0] =  2.0f * ph_fx_ / W;
+            projection[1][1] =  2.0f * ph_fy_ / H;
+            projection[2][0] =  1.0f - 2.0f * ph_cx_ / W; // x principal shift
+            projection[2][1] =  2.0f * ph_cy_ / H - 1.0f; // y principal shift
+            projection[2][2] = -(f + n) / (f - n);
+            projection[2][3] = -1.0f;
+            projection[3][2] = -2.0f * f * n / (f - n);
+        } else {
+            // lidar polar mode — existing formula, unchanged.
+            projection = glm::perspective((float)atan(((float)width)/(2*fv))*2, (float)width / (float)height, near, far);
+        }
         ourShader.setMat4("projection", projection);
 
         // camera/view transformation
-        // view = glm::lookAt(cameraPos, cameraPos + cameraFront, cameraUp);//original linear project
         view = glm::lookAt(cameraPos, cameraPos + cameraFront, cameraUp);
         ourShader.setMat4("view", view);
 
-        glm::vec2 sensing_range = glm::vec2(near,far);
+        glm::vec2 sensing_range = (sensor_type_ == "depth_pinhole")
+                                  ? glm::vec2(ph_near_, ph_far_)
+                                  : glm::vec2(near, far);
         ourShader.setVec2("range", sensing_range);
 
-        glm::vec2 fov = glm::vec2(yaw_fov,vertical_fov);
-        ourShader.setVec2("fov",fov);
-
-        glm::vec2 res = glm::vec2(downsample_res,polar_res);
-        ourShader.setVec2("res",res);
+        // Polar-only uniforms — only set when in lidar mode so pinhole shaders
+        // don't receive unused uniforms (harmless but cleaner).
+        glm::vec2 fov = glm::vec2(yaw_fov, vertical_fov);
+        glm::vec2 res = glm::vec2(downsample_res, polar_res);
+        if (sensor_type_ != "depth_pinhole") {
+            ourShader.setVec2("fov", fov);
+            ourShader.setVec2("res", res);
+        }
 
         glm::mat3 rotation_mat;
         Eigen::Matrix3f world2body = body2world_matrix.transpose();//
@@ -736,9 +847,16 @@ void opengl_pointcloud_render::render_pointcloud(pcl::PointCloud<PointType>::Ptr
         // std::cout << "One draw frame cost " << second2.count() << " seconds" << std::endl;
 
         depth_ptcloud_vec.clear();
-        read_depth(16,depth_ptcloud_vec);
-
-        pcl::copyPointCloud(*render_cloud,*output_pointcloud);
+        if (sensor_type_ == "depth_pinhole") {
+            // Branch 3: read metric depth from GL_RED channel (set by camera.fs).
+            // NDC linearisation is NOT needed — camera.fs writes metric metres directly.
+            read_depth_pinhole();
+            pcl::copyPointCloud(*render_cloud, *output_pointcloud);
+        } else {
+            // lidar (polar) mode — existing path, unchanged.
+            read_depth(16, depth_ptcloud_vec);
+            pcl::copyPointCloud(*render_cloud, *output_pointcloud);
+        }
         system_clock::time_point t2 = system_clock::now();
         auto dur = t2 - t1;
         duration<double> second(dur);
@@ -1546,7 +1664,94 @@ void opengl_pointcloud_render::read_depth2pointcloud( int depth_buffer_precision
 
 }
 
-float opengl_pointcloud_render::LinearizeDepth(float depth,float near, float far) 
+// Branch 3: read metric depth from GL_RED (written by camera.fs), apply
+// optional Gaussian noise, back-project to render_cloud, store in pinhole_depth_img_.
+void opengl_pointcloud_render::read_depth_pinhole()
+{
+    int W = ph_img_w_;
+    int H = ph_img_h_;
+
+    // GL_RED GL_FLOAT — camera.fs writes metric metres into the red channel.
+    std::vector<GLfloat> pixels(W * H, 0.0f);
+    glReadPixels(0, 0, W, H, GL_RED, GL_FLOAT, pixels.data());
+
+    // Build CV_32FC1 mat and flip (OpenGL origin is bottom-left).
+    cv::Mat raw(H, W, CV_32FC1, pixels.data());
+    cv::Mat flipped;
+    cv::flip(raw, flipped, 0);
+
+    if (ph_use_noise_ && ph_noise_sigma_ > 0.0f) {
+        apply_gaussian_noise_to_depth(flipped, ph_noise_sigma_);
+    }
+
+    // Store for the ROS node to publish.
+    pinhole_depth_img_ = flipped.clone();
+
+    // Back-project to point cloud in world frame.
+    depth_to_pointcloud_pinhole(pinhole_depth_img_, render_cloud);
+}
+
+// Additive zero-mean Gaussian noise on a metric CV_32FC1 depth image.
+// Depth values outside [ph_near_, ph_far_] after noise are clamped to ph_far_.
+// This implements the same "additive per-pixel Gaussian" pattern as the CPU
+// pcl_render_node noise injection philosophy (use_gaussian_filter param).
+void opengl_pointcloud_render::apply_gaussian_noise_to_depth(cv::Mat& depth_m, float sigma)
+{
+    static std::mt19937 rng(42);
+    std::normal_distribution<float> dist(0.0f, sigma);
+
+    for (int v = 0; v < depth_m.rows; ++v) {
+        for (int u = 0; u < depth_m.cols; ++u) {
+            float& d = depth_m.at<float>(v, u);
+            if (d <= 0.0f) continue; // skip empty pixels
+            d += dist(rng);
+            if (d < ph_near_ || d > ph_far_) {
+                d = ph_far_; // out-of-range after noise -> far_clip sentinel
+            }
+        }
+    }
+}
+
+// Back-project pinhole metric depth image to a point cloud in world frame.
+// Uses standard pinhole model: X_c = (u - cx) * d / fx, Y_c = (v - cy) * d / fy, Z_c = d.
+// Then applies camera2world rotation + camera position to get world coordinates.
+void opengl_pointcloud_render::depth_to_pointcloud_pinhole(
+        const cv::Mat& depth_m,
+        pcl::PointCloud<PointType>::Ptr out_cloud)
+{
+    out_cloud->points.clear();
+    int W = depth_m.cols;
+    int H = depth_m.rows;
+
+    for (int v = 0; v < H; ++v) {
+        for (int u = 0; u < W; ++u) {
+            float d = depth_m.at<float>(v, u);
+            if (d < ph_near_ || d >= ph_far_) continue;
+
+            // Camera-frame point (OpenGL camera: +X right, +Y up, -Z forward).
+            // We adopt ROS/sensor convention: +X forward, +Y left, +Z up — but
+            // camera2world already encodes the correct rotation from the view matrix.
+            // Here we use image-plane convention matching the projection matrix:
+            // u increases right, v increases down; camera looks along -Z in GL.
+            float Xc =  (static_cast<float>(u) - ph_cx_) * d / ph_fx_;
+            float Yc = -(static_cast<float>(v) - ph_cy_) * d / ph_fy_; // flip Y (image v-down, GL y-up)
+            float Zc = -d; // GL camera looks along -Z
+
+            Eigen::Vector3f pt_cam(Xc, Yc, Zc);
+            // camera2world: rotation matrix from view matrix (set in render_pointcloud)
+            Eigen::Vector3f pt_world = camera2world * pt_cam + camera;
+
+            PointType p;
+            p.x = pt_world(0);
+            p.y = pt_world(1);
+            p.z = pt_world(2);
+            p.intensity = 0.5f; // uniform intensity for pinhole cloud
+            out_cloud->points.push_back(p);
+        }
+    }
+}
+
+float opengl_pointcloud_render::LinearizeDepth(float depth,float near, float far)
 {
     float z = depth * 2.0 - 1.0; // back to NDC 
     return (2.0 * near * far) / (far + near - z * (far - near));    

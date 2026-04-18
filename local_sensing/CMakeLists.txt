@@ -17,7 +17,7 @@ add_definitions(-DROOT_DIR=\"${CMAKE_CURRENT_SOURCE_DIR}/\")
   find_package(OpenGL REQUIRED)
   find_package(glfw3 REQUIRED)
   find_package(catkin REQUIRED COMPONENTS
-      roscpp roslib cmake_modules pcl_ros sensor_msgs geometry_msgs nav_msgs quadrotor_msgs cv_bridge)
+      roscpp roslib cmake_modules pcl_ros sensor_msgs geometry_msgs nav_msgs quadrotor_msgs cv_bridge image_transport)
 
       FIND_PACKAGE(Boost REQUIRED COMPONENTS filesystem iostreams program_options system serialization)
       if(Boost_FOUND)

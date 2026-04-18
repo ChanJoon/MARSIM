@@ -1,0 +1,49 @@
+<launch>
+    <!-- Branch 3: single drone with GPU pinhole depth rendering.
+         Activates the opengl_render_node in depth_pinhole mode (use_gpu_:=true,
+         sensor_type:=depth_pinhole) and exposes YOPO-compatible intrinsics.
+         Published topics (under /quad_0/ namespace):
+           depth_img    — sensor_msgs/Image, 32FC1, metric metres
+           camera_info  — sensor_msgs/CameraInfo, plumb_bob distortion model
+         The v0.1 CPU golden path (single_drone_avia.launch, use_gpu_=false)
+         is unaffected by this launch file. -->
+
+    <!-- Pinhole intrinsics — YOPO defaults (160x96, H-FOV≈90°, V-FOV≈60°). -->
+    <arg name="image_width"  default="160"/>
+    <arg name="image_height" default="96"/>
+    <arg name="fx"           default="80.0"/>
+    <arg name="fy"           default="83.14"/>
+    <arg name="cx"           default="80.0"/>
+    <arg name="cy"           default="48.0"/>
+    <arg name="near_clip"    default="0.1"/>
+    <!-- far_clip defaults to sensing_horizon (30 m) set inside single_drone.xml. -->
+    <arg name="far_clip"     default="30.0"/>
+
+    <arg name="use_gaussian_filter" default="0"/>
+
+    <!-- Downstream args forwarded to single_drone_avia.launch. -->
+    <arg name="map_name"            default="$(find map_generator)/resource/small_forest01cutoff.pcd"/>
+    <arg name="downsample_resolution" default="0.1"/>
+    <arg name="controller_type"     default="pid"/>
+    <arg name="map_mode"            default="static"/>
+
+    <include file="$(find test_interface)/launch/single_drone_avia.launch">
+        <arg name="use_gpu_"               value="true"/>
+        <arg name="map_name"               value="$(arg map_name)"/>
+        <arg name="downsample_resolution"  value="$(arg downsample_resolution)"/>
+        <arg name="controller_type"        value="$(arg controller_type)"/>
+        <arg name="map_mode"               value="$(arg map_mode)"/>
+        <!-- sensor_type is passed through to opengl_render_node via single_drone.xml -->
+        <arg name="sensor_type"            value="depth_pinhole"/>
+        <arg name="image_width"            value="$(arg image_width)"/>
+        <arg name="image_height"           value="$(arg image_height)"/>
+        <arg name="fx"                     value="$(arg fx)"/>
+        <arg name="fy"                     value="$(arg fy)"/>
+        <arg name="cx"                     value="$(arg cx)"/>
+        <arg name="cy"                     value="$(arg cy)"/>
+        <arg name="near_clip"              value="$(arg near_clip)"/>
+        <arg name="far_clip"               value="$(arg far_clip)"/>
+        <arg name="use_gaussian_filter"    value="$(arg use_gaussian_filter)"/>
+    </include>
+
+</launch>
