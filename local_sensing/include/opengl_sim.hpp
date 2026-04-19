@@ -565,6 +565,12 @@ void opengl_pointcloud_render::render_pointcloud(pcl::PointCloud<PointType>::Ptr
     // glBufferData(GL_ELEMENT_ARRAY_BUFFER, sizeof(unsigned int)* points_index_infov.size(), points_index_infov.data(),GL_DYNAMIC_DRAW);
    
 
+        // Branch 3: pinhole mode draws through camera.vs/fs and does not use
+        // pattern_matrix. The matrix was sized in setParameters() using polar
+        // width/height; setPinholeParameters() later resizes width/height to
+        // the pinhole image dims (e.g. 160x96), so indexing pattern_matrix
+        // with the new dims would assert out-of-bounds in Eigen. Skip entirely.
+        if (sensor_type_ != "depth_pinhole") {
         //avia pattern
         if(use_avia_pattern == 1)
         {
@@ -673,6 +679,7 @@ void opengl_pointcloud_render::render_pointcloud(pcl::PointCloud<PointType>::Ptr
             pattern_matrix(x, y) = 2; // real pattern
             }
         }
+        } // end sensor_type_ != "depth_pinhole" guard
 
         //trans odom to matrix
         Eigen::Matrix3f body2world_matrix = camera_q.toRotationMatrix();
