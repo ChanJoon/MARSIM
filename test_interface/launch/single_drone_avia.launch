@@ -1,5 +1,5 @@
 <launch>
-    <arg name="use_gpu_" value="false"/>
+    <arg name="use_gpu_" default="false"/>
 
     <!-- Branch 4: controller_type=pid runs cascadePID_node (default, byte-identical).
          controller_type=so3 runs the Lee 2010 geometric controller instead. -->
