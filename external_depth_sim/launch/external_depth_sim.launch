@@ -1,0 +1,37 @@
+<launch>
+  <arg name="drone_id" default="0"/>
+  <arg name="map_topic" default="/map_generator/global_cloud"/>
+  <arg name="odom_topic" default="/quad_0/lidar_slam/odom"/>
+  <arg name="depth_topic" default="/quad0/depth/image_raw"/>
+  <arg name="camera_info_topic" default="/quad0/depth/camera_info"/>
+  <arg name="publish_rate" default="10.0"/>
+  <arg name="resolution" default="0.1"/>
+  <arg name="occupy_threshold" default="0"/>
+  <arg name="image_width" default="160"/>
+  <arg name="image_height" default="90"/>
+  <arg name="fx" default="80.0"/>
+  <arg name="fy" default="80.0"/>
+  <arg name="cx" default="80.0"/>
+  <arg name="cy" default="45.0"/>
+  <arg name="near_clip" default="0.1"/>
+  <arg name="far_clip" default="20.0"/>
+
+  <node pkg="external_depth_sim" type="external_depth_sim_node" name="quad$(arg drone_id)_external_depth_sim" output="screen">
+    <param name="drone_id" value="$(arg drone_id)"/>
+    <param name="map_topic" value="$(arg map_topic)"/>
+    <param name="odom_topic" value="$(arg odom_topic)"/>
+    <param name="depth_topic" value="$(arg depth_topic)"/>
+    <param name="camera_info_topic" value="$(arg camera_info_topic)"/>
+    <param name="publish_rate" value="$(arg publish_rate)"/>
+    <param name="resolution" value="$(arg resolution)"/>
+    <param name="occupy_threshold" value="$(arg occupy_threshold)"/>
+    <param name="image_width" value="$(arg image_width)"/>
+    <param name="image_height" value="$(arg image_height)"/>
+    <param name="fx" value="$(arg fx)"/>
+    <param name="fy" value="$(arg fy)"/>
+    <param name="cx" value="$(arg cx)"/>
+    <param name="cy" value="$(arg cy)"/>
+    <param name="near_clip" value="$(arg near_clip)"/>
+    <param name="far_clip" value="$(arg far_clip)"/>
+  </node>
+</launch>
