@@ -8,6 +8,9 @@
          The v0.1 CPU golden path (single_drone_avia.launch, use_gpu_=false)
          is unaffected by this launch file. -->
 
+    <!-- Canonical pinhole depth baseline for depth-based algorithms.
+         Publishes a camera-style contract on /quad0/depth/* while leaving
+         the validated cloud baseline untouched. -->
     <!-- Pinhole intrinsics — YOPO defaults (160x96, H-FOV≈90°, V-FOV≈60°). -->
     <arg name="image_width"  default="160"/>
     <arg name="image_height" default="96"/>

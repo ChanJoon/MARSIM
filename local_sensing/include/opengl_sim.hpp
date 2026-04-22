@@ -50,6 +50,8 @@
 #include <vector>
 #include <string>
 #include <numeric>
+#include <limits>
+#include <cmath>
 
 #include "FOV_Checker/FOV_Checker.h"
 #include <tr1/unordered_map>
@@ -128,6 +130,10 @@ class opengl_pointcloud_render
     float ph_noise_sigma_ = 0.0f;
     // Output depth image for pinhole mode (CV_32FC1, metric metres).
     cv::Mat pinhole_depth_img_;
+    GLuint pinhole_fbo_ = 0;
+    GLuint pinhole_color_tex_ = 0;
+    GLuint pinhole_depth_rbo_ = 0;
+    bool pinhole_fbo_ready_ = false;
 
     int use_avia_pattern = 0;
     int use_os128_pattern = 0;
@@ -195,12 +201,15 @@ class opengl_pointcloud_render
     // (CV_32FC1, metres), apply optional Gaussian noise, back-project to
     // render_cloud, and store the image in pinhole_depth_img_.
     void read_depth_pinhole();
+    bool ensure_pinhole_framebuffer();
+    void destroy_pinhole_framebuffer();
     // Apply additive zero-mean Gaussian noise (sigma in metres) to a metric
     // depth buffer.  Ported from CPU noise pattern (pcl_render_node philosophy).
     void apply_gaussian_noise_to_depth(cv::Mat& depth_m, float sigma);
     // Back-project pinhole metric depth image to a point cloud in world frame.
     void depth_to_pointcloud_pinhole(const cv::Mat& depth_m,
                                      pcl::PointCloud<PointType>::Ptr out_cloud);
+    float pinhole_no_hit_depth() const { return std::nextafter(ph_far_, std::numeric_limits<float>::infinity()); }
 
     float LinearizeDepth(float depth,float near, float far);
     float regainrealdepth(float depth,float near, float far);
@@ -349,6 +358,65 @@ void opengl_pointcloud_render::input_dyn_clouds(pcl::PointCloud<pcl::PointXYZI> 
 //     glViewport(0, 0, screen_width, screen_height);
 // }
 
+bool opengl_pointcloud_render::ensure_pinhole_framebuffer()
+{
+    if (pinhole_fbo_ready_) {
+        return true;
+    }
+
+    destroy_pinhole_framebuffer();
+
+    glGenFramebuffers(1, &pinhole_fbo_);
+    glBindFramebuffer(GL_FRAMEBUFFER, pinhole_fbo_);
+
+    glGenTextures(1, &pinhole_color_tex_);
+    glBindTexture(GL_TEXTURE_2D, pinhole_color_tex_);
+    glTexImage2D(GL_TEXTURE_2D, 0, GL_R32F, ph_img_w_, ph_img_h_, 0, GL_RED, GL_FLOAT, nullptr);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+    glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, pinhole_color_tex_, 0);
+
+    glGenRenderbuffers(1, &pinhole_depth_rbo_);
+    glBindRenderbuffer(GL_RENDERBUFFER, pinhole_depth_rbo_);
+    glRenderbufferStorage(GL_RENDERBUFFER, GL_DEPTH_COMPONENT24, ph_img_w_, ph_img_h_);
+    glFramebufferRenderbuffer(GL_FRAMEBUFFER, GL_DEPTH_ATTACHMENT, GL_RENDERBUFFER, pinhole_depth_rbo_);
+
+    GLenum draw_buffers[1] = {GL_COLOR_ATTACHMENT0};
+    glDrawBuffers(1, draw_buffers);
+
+    if (glCheckFramebufferStatus(GL_FRAMEBUFFER) != GL_FRAMEBUFFER_COMPLETE) {
+        std::cerr << "Failed to create pinhole framebuffer" << std::endl;
+        glBindFramebuffer(GL_FRAMEBUFFER, 0);
+        destroy_pinhole_framebuffer();
+        return false;
+    }
+
+    glBindTexture(GL_TEXTURE_2D, 0);
+    glBindRenderbuffer(GL_RENDERBUFFER, 0);
+    glBindFramebuffer(GL_FRAMEBUFFER, 0);
+    pinhole_fbo_ready_ = true;
+    return true;
+}
+
+void opengl_pointcloud_render::destroy_pinhole_framebuffer()
+{
+    if (pinhole_depth_rbo_ != 0) {
+        glDeleteRenderbuffers(1, &pinhole_depth_rbo_);
+        pinhole_depth_rbo_ = 0;
+    }
+    if (pinhole_color_tex_ != 0) {
+        glDeleteTextures(1, &pinhole_color_tex_);
+        pinhole_color_tex_ = 0;
+    }
+    if (pinhole_fbo_ != 0) {
+        glDeleteFramebuffers(1, &pinhole_fbo_);
+        pinhole_fbo_ = 0;
+    }
+    pinhole_fbo_ready_ = false;
+}
+
 void opengl_pointcloud_render::read_pointcloud_fromfile(std::string map_filename){
 
     // glfw: initialize and configure
@@ -417,6 +485,9 @@ void opengl_pointcloud_render::read_pointcloud_fromfile(std::string map_filename
         Shader ph_shader(pinhole_vs.c_str(), fragment_path.c_str());
         ourShader = ph_shader;
         pinhole_shader_loaded_ = true;
+        if (!ensure_pinhole_framebuffer()) {
+            return;
+        }
     } else {
         // lidar (polar) mode — use original 360camera.vs, unchanged.
         std::string vertex_path = current_path + "360camera.vs";
@@ -539,9 +610,10 @@ void opengl_pointcloud_render::read_pointcloud_fromfile(std::string map_filename
 
 opengl_pointcloud_render::~opengl_pointcloud_render(){
 
+    destroy_pinhole_framebuffer();
     glDeleteVertexArrays(1, &VAO);
     glDeleteBuffers(1, &VBO);
-    
+
     glfwTerminate();
 }
 
@@ -702,8 +774,23 @@ void opengl_pointcloud_render::render_pointcloud(pcl::PointCloud<PointType>::Ptr
 
         // render
         // ------
-        glClearColor(0.0f, 0.0f, 0.0f, 1.0f);
-        glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT); 
+        if (sensor_type_ == "depth_pinhole") {
+            if (!pinhole_fbo_ready_ && !ensure_pinhole_framebuffer()) {
+                return;
+            }
+            glDepthFunc(GL_LEQUAL);
+            glBindFramebuffer(GL_FRAMEBUFFER, pinhole_fbo_);
+            glViewport(0, 0, ph_img_w_, ph_img_h_);
+            const GLfloat pinhole_clear_value[4] = {pinhole_no_hit_depth(), 0.0f, 0.0f, 1.0f};
+            glClearBufferfv(GL_COLOR, 0, pinhole_clear_value);
+            glClear(GL_DEPTH_BUFFER_BIT);
+        } else {
+            glDepthFunc(GL_LESS);
+            glBindFramebuffer(GL_FRAMEBUFFER, 0);
+            glViewport(0, 0, width, height);
+            glClearColor(0.0f, 0.0f, 0.0f, 1.0f);
+            glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
+        }
 
         ourShader.use();
 
@@ -845,6 +932,10 @@ void opengl_pointcloud_render::render_pointcloud(pcl::PointCloud<PointType>::Ptr
         // glDrawElements(GL_POINTS, g_eigen_pt_vec.size()/2, GL_UNSIGNED_INT, 0);
         glDrawElements(GL_POINTS, points_index_infov.size(), GL_UNSIGNED_INT, 0);
 
+        if (sensor_type_ == "depth_pinhole") {
+            glBindFramebuffer(GL_FRAMEBUFFER, 0);
+            glViewport(0, 0, width, height);
+        }
         glfwSwapBuffers(window);
         glfwPollEvents();
 
@@ -1679,8 +1770,11 @@ void opengl_pointcloud_render::read_depth_pinhole()
     int H = ph_img_h_;
 
     // GL_RED GL_FLOAT — camera.fs writes metric metres into the red channel.
-    std::vector<GLfloat> pixels(W * H, 0.0f);
+    std::vector<GLfloat> pixels(W * H, pinhole_no_hit_depth());
+    glBindFramebuffer(GL_FRAMEBUFFER, pinhole_fbo_);
+    glReadBuffer(GL_COLOR_ATTACHMENT0);
     glReadPixels(0, 0, W, H, GL_RED, GL_FLOAT, pixels.data());
+    glBindFramebuffer(GL_FRAMEBUFFER, 0);
 
     // Build CV_32FC1 mat and flip (OpenGL origin is bottom-left).
     cv::Mat raw(H, W, CV_32FC1, pixels.data());
@@ -1698,10 +1792,9 @@ void opengl_pointcloud_render::read_depth_pinhole()
     depth_to_pointcloud_pinhole(pinhole_depth_img_, render_cloud);
 }
 
-// Additive zero-mean Gaussian noise on a metric CV_32FC1 depth image.
-// Depth values outside [ph_near_, ph_far_] after noise are clamped to ph_far_.
-// This implements the same "additive per-pixel Gaussian" pattern as the CPU
-// pcl_render_node noise injection philosophy (use_gaussian_filter param).
+// Additive zero-mean Gaussian noise on valid metric CV_32FC1 depth only.
+// No-hit pixels remain an out-of-range sentinel above ph_far_ so renderer truth
+// stays separate from the YOPO bridge's later max-range saturation.
 void opengl_pointcloud_render::apply_gaussian_noise_to_depth(cv::Mat& depth_m, float sigma)
 {
     static std::mt19937 rng(42);
@@ -1710,11 +1803,9 @@ void opengl_pointcloud_render::apply_gaussian_noise_to_depth(cv::Mat& depth_m, f
     for (int v = 0; v < depth_m.rows; ++v) {
         for (int u = 0; u < depth_m.cols; ++u) {
             float& d = depth_m.at<float>(v, u);
-            if (d <= 0.0f) continue; // skip empty pixels
+            if (d < ph_near_ || d > ph_far_) continue;
             d += dist(rng);
-            if (d < ph_near_ || d > ph_far_) {
-                d = ph_far_; // out-of-range after noise -> far_clip sentinel
-            }
+            d = std::min(std::max(d, ph_near_), ph_far_);
         }
     }
 }
@@ -1733,7 +1824,7 @@ void opengl_pointcloud_render::depth_to_pointcloud_pinhole(
     for (int v = 0; v < H; ++v) {
         for (int u = 0; u < W; ++u) {
             float d = depth_m.at<float>(v, u);
-            if (d < ph_near_ || d >= ph_far_) continue;
+            if (d < ph_near_ || d > ph_far_) continue;
 
             // Camera-frame point (OpenGL camera: +X right, +Y up, -Z forward).
             // We adopt ROS/sensor convention: +X forward, +Y left, +Z up — but
