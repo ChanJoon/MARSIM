@@ -12,7 +12,9 @@
     <arg name="use_gpu"/>
     <arg name="use_uav_extra_model_"/>
     <!-- controller_type: pid (default, bit-for-bit cascadePID_node)
-                          so3 (Lee 2010 geometric controller) -->
+                          so3 (Lee 2010 geometric controller)
+                          ctbr (high-rate CTBR tracker with hold fallback)
+                          none (skip stock controller; bridge owns /cmdRPM) -->
     <arg name="controller_type" default="pid"/>
     <!-- Branch 3: sensor_type selects GPU renderer mode.
          "lidar"         — polar 360camera.vs, behaviour byte-identical to pre-merge (default).
@@ -98,6 +100,25 @@
         </node>
     </group>
 
+    <group if="$(eval arg('controller_type') == 'ctbr')">
+        <node pkg="cascadePID" name="quad$(arg drone_id)_ctbr_controller_node" type="ctbr_controller_node">
+            <remap from="~odom" to="/quad_$(arg drone_id)/$(arg odom_topic)"/>
+            <remap from="~ctbr_cmd" to="/quad_$(arg drone_id)/control/ctbr_cmd"/>
+            <remap from="~cmd_RPM" to="/quad_$(arg drone_id)/cmdRPM"/>
+            <param name="controller_rate" value="200"/>
+            <param name="ctbr_timeout" value="0.15"/>
+            <param name="init_state_x" value="$(arg init_x_)"/>
+            <param name="init_state_y" value="$(arg init_y_)"/>
+            <param name="init_state_z" value="$(arg init_z_)"/>
+            <param name="mass" value="1.9"/>
+            <rosparam param="k_x">[7.0, 7.0, 11.0]</rosparam>
+            <rosparam param="k_v">[4.0, 4.0, 7.0]</rosparam>
+            <rosparam param="k_R">[1.5, 1.5, 0.5]</rosparam>
+            <rosparam param="k_Omega">[0.3, 0.3, 0.15]</rosparam>
+            <rosparam param="inertia_diag">[0.03, 0.03, 0.06]</rosparam>
+        </node>
+    </group>
+
     <node pkg="odom_visualization" name="quad$(arg drone_id)_odom_visualization" type="odom_visualization"
           output="screen">
         <remap from="~odom" to="/quad_$(arg drone_id)/$(arg odom_topic)"/>
@@ -168,6 +189,9 @@
             <param name="near_clip"           value="$(arg near_clip)"/>
             <param name="far_clip"            value="$(arg far_clip)"/>
             <param name="use_gaussian_filter" value="$(arg use_gaussian_filter)"/>
+
+            <remap from="~depth_img" to="/quad$(arg drone_id)/depth/image_raw"/>
+            <remap from="~camera_info" to="/quad$(arg drone_id)/depth/camera_info"/>
 
         </node>
         </group>
@@ -305,7 +329,7 @@
 launch-prefix="gdb --ex run -args"
         <group if="$(eval lidar_type == 'mid360')">
             <node pkg="local_sensing_node" type="pcl_render_node"
-                name="quad$(arg drone_id)_pcl_render_node" output="screen" > <!--  -->
+                name="quad$(arg drone_id)_pcl_render_node" output="screen"> <!--  -->
                 <remap from="~global_map" to="/map_generator/global_cloud"/>
                 <remap from="~odometry" to="/quad_$(arg drone_id)/$(arg odom_topic)"/>
 
