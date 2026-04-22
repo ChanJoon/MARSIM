@@ -154,6 +154,11 @@ target_link_libraries(so3_controller_node
   ${catkin_LIBRARIES}
 )
 
+add_executable(ctbr_controller_node src/ctbr_controller_node.cpp)
+target_link_libraries(ctbr_controller_node
+  ${catkin_LIBRARIES}
+)
+
 #############
 ## Install ##
 #############
