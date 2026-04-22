@@ -72,7 +72,7 @@ int main(int argc, char** argv)
         nav_msgs::Odometry odom;
         odom.header.frame_id = "world";
         odom.header.stamp = now_time;
-        Vector3d pos,vel,acc,angular_vel,angular_vel_world;
+        Vector3d pos,vel,acc,angular_vel;
         pos = quadrotor.getPos();
         vel = quadrotor.getVel();
         acc = quadrotor.getAcc();
@@ -80,7 +80,6 @@ int main(int argc, char** argv)
         Vector4d quat;
         quat = quadrotor.getQuat();
         Matrix3d R_body2world;
-        angular_vel_world = R_body2world*angular_vel;
         R_body2world = quadrotor.getR();
         odom.pose.pose.position.x = pos(0);
         odom.pose.pose.position.y = pos(1);
@@ -92,9 +91,9 @@ int main(int argc, char** argv)
         odom.twist.twist.linear.x = vel(0);
         odom.twist.twist.linear.y = vel(1);
         odom.twist.twist.linear.z = vel(2);
-        odom.twist.twist.angular.x = angular_vel_world(0);
-        odom.twist.twist.angular.y = angular_vel_world(1);
-        odom.twist.twist.angular.z = angular_vel_world(2);
+        odom.twist.twist.angular.x = angular_vel(0);
+        odom.twist.twist.angular.y = angular_vel(1);
+        odom.twist.twist.angular.z = angular_vel(2);
         odom_pub.publish(odom);
 
         ROS_INFO("Odom = %f,%f,%f, %f,%f,%f,%f",pos(0),pos(1),pos(2),quat(0),quat(1),quat(2),quat(3));
