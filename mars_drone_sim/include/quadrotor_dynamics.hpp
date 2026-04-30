@@ -1,4 +1,5 @@
 #include <math.h>
+#include <cmath>
 #include <dynamics.hpp>
 
 using namespace std;
@@ -12,6 +13,7 @@ class quadrotor_dynamics: public dynamics
         Vector4d motorRPM;
         double arm_length;
         MatrixXd motor_pos;
+        Vector4d yaw_torque_coeff;
         double min_rpm = 0;
         double max_rpm = 35000;
         double g = 9.81;
@@ -26,6 +28,7 @@ class quadrotor_dynamics: public dynamics
         using dynamics::dynamics;
         
         void init(Vector3d p, Vector4d quat);
+        void configureMotorModel(MatrixXd motor_pos_, Vector4d yaw_torque_coeff_, double k_F_, double min_rpm_, double max_rpm_);
         void step_forward(double dt);
         void setRPM(Vector4d motorRPM_);
         void setActuatoroutput(Vector4d actuator_outputs_);
@@ -43,6 +46,16 @@ void quadrotor_dynamics::init(Vector3d p, Vector4d quat)
                 -arm_length*sqrt(2)/2.0, arm_length*sqrt(2)/2.0, 0,
                  arm_length*sqrt(2)/2.0, arm_length*sqrt(2)/2.0, 0,
                 -arm_length*sqrt(2)/2.0,-arm_length*sqrt(2)/2.0, 0;
+    yaw_torque_coeff << -k_T, -k_T, k_T, k_T;
+}
+
+void quadrotor_dynamics::configureMotorModel(MatrixXd motor_pos_, Vector4d yaw_torque_coeff_, double k_F_, double min_rpm_, double max_rpm_)
+{
+    motor_pos = motor_pos_;
+    yaw_torque_coeff = yaw_torque_coeff_;
+    k_F = k_F_;
+    min_rpm = min_rpm_;
+    max_rpm = max_rpm_;
 }
 
 void quadrotor_dynamics::step_forward(double dt)
@@ -75,9 +88,11 @@ void quadrotor_dynamics::step_forward(double dt)
         torque_temp = torque_temp+ temp.cross(F_motor(i)*z_body);
     }
 
-    Torque_body = torque_temp
-                - k_T * motorRPM(0) * motorRPM(0) * z_body - k_T * motorRPM(1) * motorRPM(1) * z_body
-                + k_T * motorRPM(2) * motorRPM(2) * z_body + k_T * motorRPM(3) * motorRPM(3) * z_body;
+    Torque_body = torque_temp;
+    for(int i = 0; i < 4; i++)
+    {
+        Torque_body = Torque_body + yaw_torque_coeff(i) * motorRPM(i) * motorRPM(i) * z_body;
+    }
     
     for(int i = 0;i<3;i++)
     {
@@ -95,16 +110,23 @@ void quadrotor_dynamics::step_forward(double dt)
 
 void quadrotor_dynamics::setRPM(Vector4d motorRPM_)
 {
-    motorRPM = motorRPM_;
-
     for(int i = 0;i<4;i++)
     {
-        if(motorRPM(i)>max_rpm)
-        {
-            motorRPM(i) = max_rpm;
-        }else if (motorRPM(i) < min_rpm)
+        if(!std::isfinite(motorRPM_(i)))
         {
             motorRPM(i) = min_rpm;
+            continue;
+        }
+        if(motorRPM_(i)>max_rpm)
+        {
+            motorRPM(i) = max_rpm;
+        }else if (motorRPM_(i) < min_rpm)
+        {
+            motorRPM(i) = min_rpm;
+        }
+        else
+        {
+            motorRPM(i) = motorRPM_(i);
         }
     }
 }

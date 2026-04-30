@@ -1,5 +1,7 @@
 #include <eigen3/Eigen/Eigen>
 #include <eigen3/Eigen/Dense>
+#include <cmath>
+#include <limits>
 #include <stdio.h>
 
 // using namespace std;
@@ -48,11 +50,17 @@ dynamics::~dynamics()
 void dynamics::initialize(Eigen::Vector3d p, Eigen::Vector4d quat)
 {
     pos = p;
-    // Eigen::Quaterniond q_temp(quat(0), quat(1), quat(2), quat(3));
-    // q = q_temp;
-    // q.normalize();
     q << quat(0), quat(1), quat(2), quat(3);
-    Eigen::Quaterniond quaternion(quat(0), quat(1), quat(2), quat(3));
+    const double q_norm = q.norm();
+    if(!std::isfinite(q_norm) || q_norm <= 1e-12)
+    {
+        q << 1.0, 0.0, 0.0, 0.0;
+    }
+    else
+    {
+        q /= q_norm;
+    }
+    Eigen::Quaterniond quaternion(q(0), q(1), q(2), q(3));
     R_body2world = quaternion.matrix();
     w_body << 0,0,0;
     velocity << 0,0,0;
@@ -81,7 +89,14 @@ void dynamics::step(double dt)
     w_body_withzero << 0, w_body;
     d_q = 0.5*q_transmat*w_body_withzero;
     q = q + d_q * dt;
-    q.normalize();
+    const double q_norm = q.norm();
+    if(!std::isfinite(q_norm) || q_norm <= 1e-12)
+    {
+        q << std::numeric_limits<double>::quiet_NaN(), std::numeric_limits<double>::quiet_NaN(), std::numeric_limits<double>::quiet_NaN(), std::numeric_limits<double>::quiet_NaN();
+        R_body2world = Matrix3d::Identity();
+        return;
+    }
+    q /= q_norm;
     Eigen::Quaterniond temp_quaternion(q(0), q(1), q(2), q(3));
     R_body2world = temp_quaternion.matrix();
 }
