@@ -11,6 +11,10 @@
     <arg name="downsample_resolution_"/>
     <arg name="use_gpu"/>
     <arg name="use_uav_extra_model_"/>
+    <arg name="vehicle_profile" default="marsim_default"/>
+    <arg name="mass" default="$(eval 0.716 if arg('vehicle_profile') == 'predictnav_hummingbird' else 1.9)"/>
+    <arg name="inertia_diag" default="$(eval '[0.007, 0.007, 0.012]' if arg('vehicle_profile') == 'predictnav_hummingbird' else '[0.03, 0.03, 0.06]')"/>
+    <arg name="mesh_resource" default="package://odom_visualization/meshes/hummingbird.mesh"/>
     <!-- controller_type: pid (default, bit-for-bit cascadePID_node)
                           so3 (Lee 2010 geometric controller)
                           ctbr (high-rate CTBR tracker with hold fallback)
@@ -54,7 +58,9 @@
         <remap from="~odom" to="/quad_$(arg drone_id)/$(arg odom_topic)"/>
         <remap from="~cmd_RPM" to="/quad_$(arg drone_id)/cmdRPM"/>
         <remap from="~imu" to="/quad_$(arg drone_id)/imu"/>
-        <param name="mass" value="1.9"/>
+        <param name="vehicle_profile" value="$(arg vehicle_profile)"/>
+        <param name="mass" value="$(arg mass)"/>
+        <rosparam subst_value="true" param="inertia_diag">$(arg inertia_diag)</rosparam>
         <param name="simulation_rate" value="200"/>
         <param name="quadrotor_name" value="quad_$(arg drone_id)"/>
         <param name="init_state_x" value="$(arg init_x_)"/>
@@ -91,12 +97,13 @@
             <param name="init_state_y" value="$(arg init_y_)"/>
             <param name="init_state_z" value="$(arg init_z_)"/>
             <!-- Aligned with quadrotor_dynamics_node (1.9) and cascadePID (1.9). -->
-            <param name="mass" value="1.9"/>
+            <param name="vehicle_profile" value="$(arg vehicle_profile)"/>
+            <param name="mass" value="$(arg mass)"/>
             <rosparam param="k_x">[7.0, 7.0, 11.0]</rosparam>
             <rosparam param="k_v">[4.0, 4.0, 7.0]</rosparam>
             <rosparam param="k_R">[1.5, 1.5, 0.5]</rosparam>
             <rosparam param="k_Omega">[0.3, 0.3, 0.15]</rosparam>
-            <rosparam param="inertia_diag">[0.03, 0.03, 0.06]</rosparam>
+            <rosparam subst_value="true" param="inertia_diag">$(arg inertia_diag)</rosparam>
         </node>
     </group>
 
@@ -110,12 +117,13 @@
             <param name="init_state_x" value="$(arg init_x_)"/>
             <param name="init_state_y" value="$(arg init_y_)"/>
             <param name="init_state_z" value="$(arg init_z_)"/>
-            <param name="mass" value="1.9"/>
+            <param name="vehicle_profile" value="$(arg vehicle_profile)"/>
+            <param name="mass" value="$(arg mass)"/>
             <rosparam param="k_x">[7.0, 7.0, 11.0]</rosparam>
             <rosparam param="k_v">[4.0, 4.0, 7.0]</rosparam>
             <rosparam param="k_R">[1.5, 1.5, 0.5]</rosparam>
             <rosparam param="k_Omega">[0.3, 0.3, 0.15]</rosparam>
-            <rosparam param="inertia_diag">[0.03, 0.03, 0.06]</rosparam>
+            <rosparam subst_value="true" param="inertia_diag">$(arg inertia_diag)</rosparam>
         </node>
     </group>
 
@@ -134,7 +142,7 @@
         <param name="robot_scale" value="1.0"/>
         <param name="quadrotor_name" value="quad$(arg drone_id)"/>
         <param name="drone_id" value="$(arg drone_id)"/>
-        <param name="mesh_resource" value="package://odom_visualization/meshes/yunque.dae"/>
+        <param name="mesh_resource" value="$(arg mesh_resource)"/>
     </node>
 
     <group if="$(arg use_gpu)">

@@ -102,8 +102,8 @@ Visualization Manager:
         - Alpha: 0.5
           Autocompute Intensity Bounds: true
           Autocompute Value Bounds:
-            Max Value: 4.283109664916992
-            Min Value: -0.2723238170146942
+            Max Value: 9.393441200256348
+            Min Value: -0.24762223660945892
             Value: true
           Axis: Z
           Channel Name: intensity
@@ -147,7 +147,7 @@ Visualization Manager:
       Name: Drone0
     - Class: rviz/Image
       Enabled: true
-      Image Topic: /quad0_pcl_render_node/depth_img
+      Image Topic: /quad0/depth/image_raw
       Max Value: 1
       Median window: 5
       Min Value: 0
@@ -156,6 +156,22 @@ Visualization Manager:
       Queue Size: 2
       Transport Hint: raw
       Unreliable: false
+      Value: true
+    - Class: rviz/MarkerArray
+      Enabled: true
+      Marker Topic: /uav_bench/visualization/speed_trail
+      Name: SpeedTrail
+      Namespaces:
+        speed_trail: true
+      Queue Size: 100
+      Value: true
+    - Class: rviz/MarkerArray
+      Enabled: true
+      Marker Topic: /predictnav/visualization/debug
+      Name: PredictNavDebug
+      Namespaces:
+        predictnav_debug: true
+      Queue Size: 100
       Value: true
     - Class: rviz/Group
       Displays:
@@ -252,7 +268,7 @@ Visualization Manager:
   Views:
     Current:
       Class: rviz/ThirdPersonFollower
-      Distance: 16.355907440185547
+      Distance: 45.356224060058594
       Enable Stereo Rendering:
         Stereo Eye Separation: 0.05999999865889549
         Stereo Focal Distance: 1
@@ -268,9 +284,9 @@ Visualization Manager:
       Invert Z Axis: false
       Name: Current View
       Near Clip Distance: 0.009999999776482582
-      Pitch: 1.0447975397109985
+      Pitch: 0.49979791045188904
       Target Frame: world
-      Yaw: 2.0678701400756836
+      Yaw: 2.562870740890503
     Saved:
       - Class: rviz/ThirdPersonFollower
         Distance: 17.48538589477539
