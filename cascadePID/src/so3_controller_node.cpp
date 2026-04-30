@@ -34,13 +34,19 @@
 
 #include <eigen3/Eigen/Dense>
 #include <cmath>
+#include <string>
+#include <vector>
 
 static constexpr double G_ACC    = 9.81;
-static constexpr double K_F      = 3.0 * 8.98132e-9;
-static constexpr double K_T      = 0.07 * (3.0 * 0.062) * K_F;
-static constexpr double ARM      = 0.22;
-static constexpr double MIN_RPM  = 0.0;
-static constexpr double MAX_RPM  = 35000.0;
+static constexpr double MARSIM_K_F = 3.0 * 8.98132e-9;
+static constexpr double MARSIM_K_T = 0.07 * (3.0 * 0.062) * MARSIM_K_F;
+static constexpr double MARSIM_ARM = 0.22;
+static constexpr double PREDICTNAV_HUMMINGBIRD_K_F = 8.54858e-06;
+static constexpr double PREDICTNAV_HUMMINGBIRD_K_T = 1.3677728816219314e-07;
+static constexpr double PREDICTNAV_HUMMINGBIRD_ARM = 0.17;
+static constexpr double MIN_RPM_DEFAULT = 0.0;
+static constexpr double MARSIM_MAX_RPM = 35000.0;
+static constexpr double PREDICTNAV_HUMMINGBIRD_MAX_RPM = 838.0;
 
 // ---------- state ----------
 static nav_msgs::Odometry g_odom;
@@ -58,6 +64,12 @@ static Eigen::Vector3d g_k_R{1.5, 1.5, 0.5};
 static Eigen::Vector3d g_k_Omega{0.3, 0.3, 0.15};
 static double          g_mass = 1.5;
 static Eigen::Matrix3d g_J    = Eigen::Matrix3d::Zero();
+static double          g_motor_force_constant = MARSIM_K_F;
+static double          g_motor_moment_constant = MARSIM_K_T;
+static double          g_motor_arm_length = MARSIM_ARM;
+static double          g_min_rpm = MIN_RPM_DEFAULT;
+static double          g_max_rpm = MARSIM_MAX_RPM;
+static bool            g_predictnav_hummingbird_layout = false;
 
 static ros::Publisher g_rpm_pub;
 
@@ -81,7 +93,17 @@ static Eigen::Vector3d vee(const Eigen::Matrix3d& M)
 // matching cascadePID.hpp::setInternal() exactly.
 static Eigen::Matrix4d buildMixerInv()
 {
-    const double L  = ARM * std::sqrt(2.0) / 2.0;
+    if (g_predictnav_hummingbird_layout)
+    {
+        Eigen::Matrix4d M;
+        M.row(0) << g_motor_force_constant, g_motor_force_constant, g_motor_force_constant, g_motor_force_constant;
+        M.row(1) << 0.0, g_motor_force_constant * g_motor_arm_length, 0.0, -g_motor_force_constant * g_motor_arm_length;
+        M.row(2) << -g_motor_force_constant * g_motor_arm_length, 0.0, g_motor_force_constant * g_motor_arm_length, 0.0;
+        M.row(3) << g_motor_moment_constant, -g_motor_moment_constant, g_motor_moment_constant, -g_motor_moment_constant;
+        return M;
+    }
+
+    const double L  = g_motor_arm_length * std::sqrt(2.0) / 2.0;
     // Motor positions (X-type):
     //  0: (+L, -L, 0)  CCW  → -k_T yaw sign
     //  1: (-L, +L, 0)  CCW  → -k_T yaw sign
@@ -89,10 +111,10 @@ static Eigen::Matrix4d buildMixerInv()
     //  3: (-L, -L, 0)  CW   → +k_T yaw sign
     Eigen::Matrix4d M;
     //                 m0    m1    m2    m3
-    M.row(0) <<  K_F,  K_F,  K_F,  K_F;          // total thrust coef
-    M.row(1) <<  K_F*(-L), K_F*( L), K_F*( L), K_F*(-L);  // roll (tau_x)
-    M.row(2) <<  K_F*( L), K_F*(-L), K_F*( L), K_F*(-L);  // pitch (tau_y)
-    M.row(3) << -K_T,     -K_T,      K_T,       K_T;       // yaw (tau_z)
+    M.row(0) <<  g_motor_force_constant,  g_motor_force_constant,  g_motor_force_constant,  g_motor_force_constant;          // total thrust coef
+    M.row(1) <<  g_motor_force_constant*(-L), g_motor_force_constant*( L), g_motor_force_constant*( L), g_motor_force_constant*(-L);  // roll (tau_x)
+    M.row(2) <<  g_motor_force_constant*(-L), g_motor_force_constant*( L), g_motor_force_constant*(-L), g_motor_force_constant*( L);  // pitch (tau_y)
+    M.row(3) << -g_motor_moment_constant,     -g_motor_moment_constant,      g_motor_moment_constant,       g_motor_moment_constant;       // yaw (tau_z)
     return M;
 }
 
@@ -184,7 +206,7 @@ void controlLoop(const ros::TimerEvent&)
     for (int i = 0; i < 4; ++i)
     {
         double n = (rpm_sq(i) > 0.0) ? std::sqrt(rpm_sq(i)) : 0.0;
-        n = std::max(MIN_RPM, std::min(MAX_RPM, n));
+        n = std::max(g_min_rpm, std::min(g_max_rpm, n));
         rpm_msg.data[i] = static_cast<float>(n);
     }
 
@@ -198,7 +220,16 @@ int main(int argc, char** argv)
 
     // --- Gains ---
     std::vector<double> k_x_vec, k_v_vec, k_R_vec, k_Omega_vec, inertia_vec;
-    nh.param("mass", g_mass, 1.5);
+    std::string vehicle_profile;
+    nh.param("vehicle_profile", vehicle_profile, std::string("marsim_default"));
+    g_predictnav_hummingbird_layout = (vehicle_profile == "predictnav_hummingbird");
+
+    nh.param("mass", g_mass, g_predictnav_hummingbird_layout ? 0.716 : 1.5);
+    nh.param("motor_arm_length", g_motor_arm_length, g_predictnav_hummingbird_layout ? PREDICTNAV_HUMMINGBIRD_ARM : MARSIM_ARM);
+    nh.param("motor_force_constant", g_motor_force_constant, g_predictnav_hummingbird_layout ? PREDICTNAV_HUMMINGBIRD_K_F : MARSIM_K_F);
+    nh.param("motor_moment_constant", g_motor_moment_constant, g_predictnav_hummingbird_layout ? PREDICTNAV_HUMMINGBIRD_K_T : MARSIM_K_T);
+    nh.param("min_rpm", g_min_rpm, MIN_RPM_DEFAULT);
+    nh.param("max_rpm", g_max_rpm, g_predictnav_hummingbird_layout ? PREDICTNAV_HUMMINGBIRD_MAX_RPM : MARSIM_MAX_RPM);
 
     if (nh.getParam("k_x", k_x_vec) && k_x_vec.size() == 3)
         g_k_x = Eigen::Map<Eigen::Vector3d>(k_x_vec.data());
@@ -245,7 +276,16 @@ int main(int argc, char** argv)
 
     ros::Timer timer = nh.createTimer(ros::Duration(1.0 / controller_rate), controlLoop);
 
-    ROS_INFO("[so3_controller] started: mass=%.2f kg, rate=%.0f Hz", g_mass, controller_rate);
+    ROS_INFO(
+        "[so3_controller] started: vehicle_profile=%s mass=%.3f kg, rate=%.0f Hz, arm=%.3f kF=%.9g kM=%.9g max_rpm=%.1f",
+        vehicle_profile.c_str(),
+        g_mass,
+        controller_rate,
+        g_motor_arm_length,
+        g_motor_force_constant,
+        g_motor_moment_constant,
+        g_max_rpm
+    );
 
     ros::spin();
     return 0;
