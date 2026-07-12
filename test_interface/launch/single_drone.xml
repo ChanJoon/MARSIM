@@ -20,6 +20,7 @@
                           ctbr (high-rate CTBR tracker with hold fallback)
                           none (skip stock controller; bridge owns /cmdRPM) -->
     <arg name="controller_type" default="pid"/>
+    <arg name="wait_for_first_command" default="false"/>
     <!-- Branch 3: sensor_type selects GPU renderer mode.
          "lidar"         — polar 360camera.vs, behaviour byte-identical to pre-merge (default).
          "depth_pinhole" — standard pinhole camera.vs/fs, publishes 32FC1 metric depth +
@@ -62,6 +63,7 @@
         <param name="mass" value="$(arg mass)"/>
         <rosparam subst_value="true" param="inertia_diag">$(arg inertia_diag)</rosparam>
         <param name="simulation_rate" value="200"/>
+        <param name="wait_for_first_command" value="$(arg wait_for_first_command)"/>
         <param name="quadrotor_name" value="quad_$(arg drone_id)"/>
         <param name="init_state_x" value="$(arg init_x_)"/>
         <param name="init_state_y" value="$(arg init_y_)"/>

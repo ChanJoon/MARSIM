@@ -100,6 +100,7 @@ int main(int argc, char** argv)
 
     double init_x, init_y, init_z,mass;
     double simulation_rate;
+    bool wait_for_first_command;
     double motor_arm_length, motor_force_constant, motor_moment_constant, min_rpm, max_rpm;
     std::string quad_name;
     std::string vehicle_profile;
@@ -111,6 +112,7 @@ int main(int argc, char** argv)
     n.param("init_state_y", init_y, 0.0);
     n.param("init_state_z", init_z, 1.0);
     n.param("simulation_rate", simulation_rate, 200.0);
+    n.param("wait_for_first_command", wait_for_first_command, false);
     n.param("quadrotor_name", quad_name, std::string("quadrotor"));
     n.param("motor_arm_length", motor_arm_length, use_predictnav_hummingbird ? 0.17 : 0.22);
     n.param("motor_force_constant", motor_force_constant, use_predictnav_hummingbird ? 8.54858e-06 : 3.0 * 8.98132e-9);
@@ -194,7 +196,14 @@ int main(int argc, char** argv)
             rate.sleep();
             continue;
         }
-        quadrotor.step_forward(dt);
+        if(wait_for_first_command && !has_valid_rpm_input)
+        {
+            ROS_INFO_THROTTLE(1.0, "Waiting for first valid cmd_RPM before dynamics integration");
+        }
+        else
+        {
+            quadrotor.step_forward(dt);
+        }
         last_time = now_time;
 
         //publish odometry
